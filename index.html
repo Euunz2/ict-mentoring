@@ -154,7 +154,7 @@ const state = {
   role: 'student',
   mentors: [], bookings: [], members: [],
   mentorId: null, slot: null, lastBooking: null,
-  week: 0, availDraft: null,
+  week: 0, availDraft: null, photoDraft: null,
   signupError: '',
 };
 
@@ -359,13 +359,13 @@ function viewList(){
     const openCount = ALL_DATES.reduce((c,d)=> c + HOURS.filter(h=>canStart(m,d,h)).length, 0);
     return `<div class="card" data-open="${m.id}" style="padding:18px;cursor:pointer;display:flex;flex-direction:column;gap:13px">
       <div style="display:flex;align-items:center;gap:13px">
-        <div style="width:50px;height:50px;border-radius:50%;background:${m.color};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:17px;flex:none">${esc(m.initials)}</div>
+        ${avatarHtml(m,50)}
         <div style="min-width:0;flex:1">
           <div style="display:flex;align-items:center;gap:8px"><span style="font-weight:600;font-size:16px">${esc(m.name)}</span><span class="badge ${openCount>0?'b-ok':'b-done'}">${openCount>0?'예약가능':'마감'}</span></div>
           <div style="font-size:13px;color:var(--ink-600);margin-top:2px">${esc(m.org)} · ${esc(m.field)}</div>
         </div>
       </div>
-      <p style="font-size:13px;color:var(--ink-700);line-height:1.55;margin:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(m.intro)}</p>
+      <p style="font-size:13px;color:var(--ink-700);line-height:1.55;margin:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(m.about||m.intro||'')}</p>
       <div style="display:flex;gap:6px;flex-wrap:wrap">${(m.tags||[]).map(t=>`<span class="chip">${esc(t)}</span>`).join('')}</div>
       <div style="display:flex;align-items:center;justify-content:space-between;border-top:1px solid var(--line);padding-top:12px">
         <span style="font-size:12.5px;color:var(--ink-600)">예약 가능 ${openCount}자리</span>
@@ -384,6 +384,16 @@ function viewList(){
 }
 
 /* ── 멘토 상세 + 시간표 ── */
+function avatarHtml(m, size){
+  const sz=size||50; const fs=Math.round(sz*0.34);
+  if(m&&m.photo) return `<div style="width:${sz}px;height:${sz}px;border-radius:50%;flex:none;background-image:url('${m.photo}');background-size:cover;background-position:center"></div>`;
+  return `<div style="width:${sz}px;height:${sz}px;border-radius:50%;background:${(m&&m.color)||'#2563eb'};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:${fs}px;flex:none">${esc((m&&m.initials)||'')}</div>`;
+}
+function readPhoto(file, cb){
+  const r=new FileReader();
+  r.onload=()=>{ const img=new Image(); img.onload=()=>{ try{ const S=220; const c=document.createElement('canvas'); c.width=S;c.height=S; const ctx=c.getContext('2d'); const scale=Math.max(S/img.width,S/img.height); const w=img.width*scale,h=img.height*scale; ctx.drawImage(img,(S-w)/2,(S-h)/2,w,h); cb(c.toDataURL('image/jpeg',0.85)); }catch(e){ cb(r.result); } }; img.src=r.result; };
+  r.readAsDataURL(file);
+}
 function weekNav(){
   const w=state.week;
   return `<div style="display:flex;align-items:center;gap:8px">
@@ -394,35 +404,34 @@ function weekNav(){
 }
 function weeklyGrid(m, wk, mode){
   const av = mode==='edit' ? (state.availDraft||new Set()) : null;
-  const head = wk.map(([d,dw])=>`<th style="padding:8px 3px;font-size:11.5px;color:var(--ink-600);font-weight:600;text-align:center">${dw}<br><span style="font-size:15px;color:var(--ink-900)">${d.split('/')[1]}</span></th>`).join('');
+  const cols = wk.map(()=>'<col>').join('');
+  const head = wk.map(([d,dw])=>`<th style="padding:8px 3px;font-size:11.5px;color:var(--ink-600);font-weight:600;text-align:center">${dw}<br><span style="font-size:13px;color:var(--ink-900)">${d}</span></th>`).join('');
   const rows = HOURS.map(h=>{
     const cells = wk.map(([d,dw])=>{
-      if(!IN_PERIOD(d)) return `<td style="padding:2px"><div style="height:30px;border-radius:6px;background:var(--ink-100)"></div></td>`;
+      if(!IN_PERIOD(d)) return `<td style="padding:2px"><div style="height:32px;border-radius:6px;background:var(--ink-100)"></div></td>`;
       const occ = hourOccupied(m.id,d,h);
       if(mode==='book'){
         const sel = state.slot && state.slot.date===d && (state.slot.time===h || nextHour(state.slot.time)===h);
         const ok = canStart(m,d,h);
-        let st, txt='';
-        if(occ){ st='background:var(--ink-100);color:var(--ink-400);cursor:not-allowed'; txt='예약'; }
-        else if(sel){ st='background:var(--brand);color:#fff;cursor:pointer'; }
-        else if(ok){ st='background:#fff;border:1px solid var(--brand-200);color:var(--brand-700);cursor:pointer'; }
-        else { st='background:#fafafa;color:var(--ink-300);cursor:default'; }
-        const attr = (ok&&!occ)?`data-slot="${d}|${h}"`:'';
-        return `<td style="padding:2px"><button ${attr} style="width:100%;height:30px;border:none;border-radius:6px;font-size:11px;font-weight:500;${st}">${txt}</button></td>`;
+        let st, txt, attr='';
+        if(sel){ st='background:var(--brand);color:#fff;cursor:pointer'; txt='선택'; attr=`data-slot="${d}|${h}"`; }
+        else if(ok&&!occ){ st='background:#fff;border:1px solid var(--brand-200);color:var(--brand-700);cursor:pointer'; txt='예약 가능'; attr=`data-slot="${d}|${h}"`; }
+        else { st='background:var(--ink-100);color:var(--ink-400);cursor:not-allowed'; txt='예약 불가'; }
+        return `<td style="padding:2px"><button ${attr} style="width:100%;height:32px;border:none;border-radius:6px;font-size:10.5px;font-weight:500;white-space:nowrap;overflow:hidden;${st}">${txt}</button></td>`;
       } else {
         const on = av.has(d+'|'+h);
-        let st, txt='';
+        let st, txt='', attr=occ?'':`data-avail="${d}|${h}"`;
         if(occ){ st='background:var(--ink-150);color:var(--ink-500);cursor:not-allowed'; txt='예약'; }
         else if(on){ st='background:var(--brand-50);border:1px solid var(--brand-200);color:var(--brand-700);cursor:pointer'; txt='가능'; }
         else { st='background:#fff;border:1px dashed var(--ink-300);color:var(--ink-400);cursor:pointer'; }
-        const attr = occ?'':`data-avail="${d}|${h}"`;
-        return `<td style="padding:2px"><button ${attr} style="width:100%;height:30px;border-radius:6px;font-size:11px;font-weight:500;${st}">${txt}</button></td>`;
+        return `<td style="padding:2px"><button ${attr} style="width:100%;height:32px;border-radius:6px;font-size:11px;font-weight:500;white-space:nowrap;${st}">${txt}</button></td>`;
       }
     }).join('');
     return `<tr><td style="padding:2px 8px 2px 0;font-size:11px;color:var(--ink-600);white-space:nowrap;text-align:right">${h}</td>${cells}</tr>`;
   }).join('');
-  return `<div style="overflow:auto"><table style="width:100%;border-collapse:collapse"><thead><tr><th style="width:44px"></th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
+  return `<div style="overflow-x:auto"><table style="width:100%;table-layout:fixed;border-collapse:collapse"><colgroup><col style="width:46px">${cols}</colgroup><thead><tr><th></th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
 }
+
 function viewDetail(){
   const m=mentorById(state.mentorId)||state.mentors[0];
   const blocked=menteeBlocked();
@@ -445,14 +454,14 @@ function viewDetail(){
       <div style="display:grid;grid-template-columns:300px 1fr;gap:20px;align-items:start">
         <div class="card" style="padding:22px">
           <div style="display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px">
-            <div style="width:78px;height:78px;border-radius:50%;background:${m.color};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:26px">${esc(m.initials)}</div>
+            ${avatarHtml(m,78)}
             <div style="font-weight:600;font-size:19px">${esc(m.name)} 멘토</div>
           </div>
-          <div style="display:flex;flex-direction:column;gap:8px;margin:16px 0;font-size:13px;color:var(--ink-700)"><div>🏢 ${esc(m.org)}</div><div>📍 수도권 ICT이노베이션스퀘어</div></div>
+          <div style="display:flex;flex-direction:column;gap:8px;margin:16px 0;font-size:13px;color:var(--ink-700)"><div>🏢 ${esc(m.org||'')}</div><div>💼 ${esc(m.field||'')}</div></div>
           <div style="border-top:1px solid var(--line);margin:14px 0"></div>
-          <div style="font-size:11px;font-weight:600;letter-spacing:.06em;color:var(--ink-600);margin-bottom:10px">가능한 멘토링 분야</div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">${(m.areas||[]).map(a=>`<span class="badge b-confirm">${esc(a)}</span>`).join('')}</div>
-          <p style="font-size:13px;line-height:1.6;color:var(--ink-700);margin:0">${esc(m.about||m.intro||'')}</p>
+          <div style="font-size:11px;font-weight:600;letter-spacing:.06em;color:var(--ink-600);margin-bottom:10px">대표 분야</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">${(m.tags||[]).map(a=>`<span class="badge b-confirm">${esc(a)}</span>`).join('')}</div>
+          <p style="font-size:13px;line-height:1.6;color:var(--ink-700);margin:0">${esc(m.about||'')}</p>
         </div>
         ${right}
       </div>
@@ -654,25 +663,31 @@ function viewMentorAvail(){
 /* ── 멘토: 프로필 (편집) ── */
 function viewMentorProfile(){
   const m=mentorDraft();
+  const photo = state.photoDraft!==null ? state.photoDraft : (m.photo||null);
+  const avatar = photo ? `<div style="width:72px;height:72px;border-radius:50%;background-image:url('${photo}');background-size:cover;background-position:center"></div>`
+    : `<div style="width:72px;height:72px;border-radius:50%;background:${m.color};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:24px">${esc(m.initials||'')}</div>`;
   return `<div style="max-width:720px;margin:0 auto;padding:28px 32px 60px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:22px"><h1 style="font-size:24px;font-weight:500;margin:0">프로필${m.id?'':' 등록'}</h1><button id="pf_save" class="btn">저장</button></div>
     <div class="card" style="padding:24px">
-      <div style="display:flex;align-items:center;gap:16px;margin-bottom:18px">
-        <div style="width:64px;height:64px;border-radius:50%;background:${m.color};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:22px">${esc(m.initials||'')}</div>
-        <div style="font-size:13px;color:var(--ink-600)">로그인 이메일: ${esc(m.email||state.session.email)}</div>
+      <div style="display:flex;align-items:center;gap:18px;margin-bottom:20px">
+        ${avatar}
+        <div>
+          <label for="pf_photo" class="btn-ghost" style="display:inline-block;height:36px;line-height:34px;padding:0 16px;border-radius:var(--r-pill);cursor:pointer;font-weight:600;font-size:13px">프로필 사진 등록</label>
+          <input type="file" id="pf_photo" accept="image/*" style="display:none">
+          <div style="font-size:12px;color:var(--ink-500);margin-top:6px">정사각형 이미지를 권장합니다.</div>
+        </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px 18px">
         <label class="field"><span class="lbl">성명</span><input id="pf_name" class="inp" value="${esc(m.name||'')}"></label>
         <label class="field"><span class="lbl">소속</span><input id="pf_org" class="inp" value="${esc(m.org||'')}" placeholder="○○회사"></label>
-        <label class="field" style="grid-column:1/-1"><span class="lbl">대표 분야</span><input id="pf_field" class="inp" value="${esc(m.field||'')}" placeholder="예) AI/LLM"></label>
-        <label class="field" style="grid-column:1/-1"><span class="lbl">태그 <span style="font-weight:400;color:var(--ink-500)">(쉼표로 구분)</span></span><input id="pf_tags" class="inp" value="${esc((m.tags||[]).join(', '))}" placeholder="RAG, LangChain, 프롬프트"></label>
-        <label class="field" style="grid-column:1/-1"><span class="lbl">가능한 멘토링 분야 <span style="font-weight:400;color:var(--ink-500)">(쉼표로 구분)</span></span><input id="pf_areas" class="inp" value="${esc((m.areas||[]).join(', '))}" placeholder="RAG 파이프라인, LLM 서빙"></label>
-        <label class="field" style="grid-column:1/-1"><span class="lbl">한 줄 소개</span><input id="pf_intro" class="inp" value="${esc(m.intro||'')}"></label>
+        <label class="field" style="grid-column:1/-1"><span class="lbl">직무</span><input id="pf_field" class="inp" value="${esc(m.field||'')}" placeholder="예) 백엔드 엔지니어"></label>
+        <label class="field" style="grid-column:1/-1"><span class="lbl">대표 분야 태그 <span style="font-weight:400;color:var(--ink-500)">(쉼표로 구분)</span></span><input id="pf_tags" class="inp" value="${esc((m.tags||[]).join(', '))}" placeholder="RAG, LangChain, 프롬프트"></label>
         <label class="field" style="grid-column:1/-1"><span class="lbl">소개</span><textarea id="pf_about" class="inp" rows="4">${esc(m.about||'')}</textarea></label>
       </div>
       <div id="pf_msg" style="margin-top:14px"></div>
     </div></div>`;
 }
+
 async function saveAvail(){
   const m=mentorDraft(); const availArr=[...(state.availDraft||new Set())];
   try{
@@ -685,18 +700,19 @@ async function saveAvail(){
 async function saveProfile(){
   const g=(id)=>$('#'+id)?$('#'+id).value.trim():'';
   const nm=g('pf_name')||state.session.name;
+  const m=getMyMentor();
+  const photo = state.photoDraft!==null ? state.photoDraft : ((m&&m.photo)||null);
   const patch={ name:nm, org:g('pf_org'), field:g('pf_field'),
     tags:g('pf_tags').split(',').map(x=>x.trim()).filter(Boolean),
-    areas:g('pf_areas').split(',').map(x=>x.trim()).filter(Boolean),
-    intro:g('pf_intro'), about:g('pf_about'), initials:nm.slice(0,2), email:state.session.email };
-  const m=getMyMentor();
+    about:g('pf_about'), initials:nm.slice(0,2), email:state.session.email, photo };
   try{
     if(m){ await store.updateMentor(m.id, patch); }
-    else { const nid=await nextMentorId(); await store.addMentor({ id:nid, color:'#2563eb', days:[], avail:[], ...patch }); }
+    else { const nid=await nextMentorId(); await store.addMentor({ id:nid, color:'#2563eb', days:[], avail:[], intro:'', areas:[], ...patch }); }
     toast('프로필이 저장되었습니다.');
   }catch(e){ const el=$('#pf_msg'); if(el) el.innerHTML=err('저장 오류: '+(e.message||e)); return; }
-  await reload();
+  state.photoDraft=null; await reload();
 }
+
 function noMentorNotice(){
   return `<div style="max-width:720px;margin:0 auto;padding:48px 32px"><div class="card" style="padding:40px;text-align:center;color:var(--ink-600);line-height:1.7">멘토 정보를 불러올 수 없습니다.</div></div>`;
 }
@@ -710,12 +726,13 @@ function bindShell(){
   app.querySelectorAll('[data-avail]').forEach(b=>b.addEventListener('click',()=>{ const k=b.dataset.avail; if(!state.availDraft) state.availDraft=new Set(); if(state.availDraft.has(k)) state.availDraft.delete(k); else state.availDraft.add(k); render(); }));
   const avs=$('#av_save'); if(avs) avs.addEventListener('click',saveAvail);
   const pfs=$('#pf_save'); if(pfs) pfs.addEventListener('click',saveProfile);
+  const pfp=$('#pf_photo'); if(pfp) pfp.addEventListener('change',(e)=>{ const fl=e.target.files&&e.target.files[0]; if(!fl)return; readPhoto(fl,(uri)=>{ state.photoDraft=uri; render(); }); });
   app.querySelectorAll('[data-goto="book"]').forEach(b=>b.addEventListener('click',()=>{ if(state.role!=='student'||menteeBlocked())return; go('book'); }));
   const fs=$('#f_submit'); if(fs) fs.addEventListener('click',doBooking);
   const bp=$('#f_phone'); if(bp) bp.addEventListener('input',()=>{ bp.value=formatPhone(bp.value); });
   app.querySelectorAll('[data-cancel]').forEach(b=>b.addEventListener('click',async()=>{ if(!confirm('예약을 취소하시겠습니까?'))return; try{ await store.cancelBooking(b.dataset.cancel); toast('예약이 취소되었습니다.'); }catch(e){ toast('취소 오류: '+(e.message||e)); } await reload(); }));
 }
-function go(v){ state.view=v; state.week=0; if(v!=='mavail') state.availDraft=null; if(v==='list'){ state.slot=null; state.mentorId=null; } render(); }
+function go(v){ state.view=v; state.week=0; if(v!=='mavail') state.availDraft=null; if(v!=='mprofile') state.photoDraft=null; if(v==='list'){ state.slot=null; state.mentorId=null; } render(); }
 function logout(){ state.session=null; localStorage.removeItem('ict_session'); state.gateView='login'; state.prefill={name:'',phone:'',email:''}; state.view='list'; state.slot=null; state.mentorId=null; render(); }
 
 /* ═══════════ 시작 ═══════════ */
