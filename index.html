@@ -81,13 +81,20 @@ const ICONS = {
   amembers:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="8" r="3.6"/><path d="M5 20c.7-4 3.6-6 7-6s6.3 2 7 6" stroke-linecap="round"/></svg>',
   amentors:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.5-3 2.8-4.6 5.5-4.6S14 16 14.5 19" stroke-linecap="round"/><circle cx="17.5" cy="9" r="2.4"/><path d="M15 18c.3-2 1.6-3 3-3s2.7 1 3 3" stroke-linecap="round"/></svg>',
 };
-const DAYS = [
-  {date:'7/21',dow:'화'},{date:'7/22',dow:'수'},{date:'7/23',dow:'목'},{date:'7/24',dow:'금'},{date:'7/25',dow:'토'},
-  {date:'7/28',dow:'월'},{date:'7/29',dow:'화'},{date:'7/30',dow:'수'},{date:'8/1',dow:'금'},
-  {date:'8/4',dow:'월'},{date:'8/6',dow:'수'},{date:'8/8',dow:'금'}
+// 멘토링 기간 7/21(화)~8/9(일). 주간 캘린더(월~일) 3주.
+const WEEKS = [
+  [['7/20','월'],['7/21','화'],['7/22','수'],['7/23','목'],['7/24','금'],['7/25','토'],['7/26','일']],
+  [['7/27','월'],['7/28','화'],['7/29','수'],['7/30','목'],['7/31','금'],['8/1','토'],['8/2','일']],
+  [['8/3','월'],['8/4','화'],['8/5','수'],['8/6','목'],['8/7','금'],['8/8','토'],['8/9','일']],
 ];
-const TIMES = ['09:00','11:00','13:00','15:00'];
-const dowOf = (d)=>{ const x=DAYS.find(v=>v.date===d); return x?x.dow:''; };
+const DOW={}; WEEKS.forEach(w=>w.forEach(([d,dw])=>{DOW[d]=dw;}));
+const dowOf = (d)=> DOW[d]||'';
+const HOURS = Array.from({length:14},(_,i)=> String(9+i).padStart(2,'0')+':00'); // 09:00~22:00
+const nextHour = (h)=>{ const n=parseInt(h,10)+1; return n<=22? String(n).padStart(2,'0')+':00' : null; };
+const plus2 = (h)=>{ const n=parseInt(h,10)+2; return String(n).padStart(2,'0')+':00'; };
+const slotRange = (h)=> h+'~'+plus2(h);
+const IN_PERIOD = (d)=> d!=='7/20';
+const ALL_DATES = WEEKS.flat().map(x=>x[0]).filter(IN_PERIOD);
 
 const SEED_MENTORS = [
   {id:1,name:'김도연',initials:'KD',color:'#2563eb',field:'AI/LLM',org:'네이버클라우드',tags:['RAG','LangChain','프롬프트'],areas:['RAG 파이프라인','LangChain','프롬프트 엔지니어링','LLM 서빙'],intro:'LLM 애플리케이션과 RAG 파이프라인을 6년간 설계·운영. 실무 아키텍처 리뷰와 취업 포트폴리오 피드백을 제공합니다.',about:'LLM 애플리케이션과 RAG 파이프라인을 6년간 설계·운영했습니다. 실무 사례 중심으로 아키텍처 리뷰와 취업 포트폴리오 피드백을 드립니다.',days:['7/21','7/24','7/30']},
@@ -106,7 +113,15 @@ const LS = {
 const store = {
   async mentors(){
     if(SB){ const {data,error}=await SB.from('mentors').select('*').order('id'); if(error)throw error; return data.length?data:SEED_MENTORS; }
-    return SEED_MENTORS;
+    let ls=LS.get('ict_mentors',null); if(!ls){ ls=SEED_MENTORS.map(m=>({...m})); LS.set('ict_mentors',ls); } return ls;
+  },
+  async updateMentor(id,patch){
+    if(SB){ const {data,error}=await SB.from('mentors').update(patch).eq('id',id).select().single(); if(error)throw error; return data; }
+    const ls=LS.get('ict_mentors',SEED_MENTORS.map(m=>({...m}))).map(m=>String(m.id)===String(id)?{...m,...patch}:m); LS.set('ict_mentors',ls); return ls.find(m=>String(m.id)===String(id));
+  },
+  async addMentor(m){
+    if(SB){ const {data,error}=await SB.from('mentors').insert(m).select().single(); if(error)throw error; return data; }
+    const ls=LS.get('ict_mentors',SEED_MENTORS.map(x=>({...x}))); ls.push(m); LS.set('ict_mentors',ls); return m;
   },
   async bookings(){
     if(SB){ const {data,error}=await SB.from('bookings').select('*').order('created_at',{ascending:false}); if(error)throw error; return data; }
@@ -139,6 +154,7 @@ const state = {
   role: 'student',
   mentors: [], bookings: [], members: [],
   mentorId: null, slot: null, lastBooking: null,
+  week: 0, availDraft: null,
   signupError: '',
 };
 
@@ -149,7 +165,9 @@ const randMeet = ()=>'meet.google.com/'+rand(3)+'-'+rand(4)+'-'+rand(3);
 const bookingNo = ()=>'BK-'+Math.floor(2050+Math.random()*900);
 function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),2400); }
 
-const isBooked = (mid,d,t)=> state.bookings.some(b=>String(b.mentor_id)===String(mid)&&b.date===d&&b.time===t&&b.status!=='취소');
+const mentorAvailSet = (m)=>{ if(m&&Array.isArray(m.avail)&&m.avail.length) return new Set(m.avail); const s=new Set(); (m&&m.days||[]).forEach(d=>HOURS.forEach(h=>s.add(d+'|'+h))); return s; };
+const hourOccupied = (mid,d,h)=> state.bookings.some(b=>String(b.mentor_id)===String(mid)&&b.date===d&&b.status!=='취소'&&(b.time===h||nextHour(b.time)===h));
+const canStart = (m,d,h)=>{ if(!IN_PERIOD(d)) return false; const nh=nextHour(h); if(!nh) return false; const av=mentorAvailSet(m); return av.has(d+'|'+h)&&av.has(d+'|'+nh)&&!hourOccupied(m.id,d,h)&&!hourOccupied(m.id,d,nh); };
 const myBookings = ()=> state.bookings.filter(b=> state.session && b.email===state.session.email);
 const menteeBlocked = ()=> state.role==='student' && myBookings().some(b=>b.status!=='취소');
 const mentorById = (id)=> state.mentors.find(m=>String(m.id)===String(id));
@@ -338,7 +356,7 @@ function body(){
 function viewList(){
   const blocked = menteeBlocked();
   const cards = state.mentors.map(m=>{
-    const openCount = (m.days||[]).reduce((c,d)=> c + TIMES.filter(t=>!isBooked(m.id,d,t)).length, 0);
+    const openCount = ALL_DATES.reduce((c,d)=> c + HOURS.filter(h=>canStart(m,d,h)).length, 0);
     return `<div class="card" data-open="${m.id}" style="padding:18px;cursor:pointer;display:flex;flex-direction:column;gap:13px">
       <div style="display:flex;align-items:center;gap:13px">
         <div style="width:50px;height:50px;border-radius:50%;background:${m.color};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:17px;flex:none">${esc(m.initials)}</div>
@@ -366,35 +384,65 @@ function viewList(){
 }
 
 /* ── 멘토 상세 + 시간표 ── */
+function weekNav(){
+  const w=state.week;
+  return `<div style="display:flex;align-items:center;gap:8px">
+    <button data-week="prev" ${w<=0?'disabled':''} style="width:30px;height:30px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--ink-700);cursor:${w<=0?'not-allowed':'pointer'}">‹</button>
+    <span style="font-size:13px;font-weight:600;color:var(--ink-800)">${w+1}주차</span>
+    <button data-week="next" ${w>=2?'disabled':''} style="width:30px;height:30px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--ink-700);cursor:${w>=2?'not-allowed':'pointer'}">›</button>
+  </div>`;
+}
+function weeklyGrid(m, wk, mode){
+  const av = mode==='edit' ? (state.availDraft||new Set()) : null;
+  const head = wk.map(([d,dw])=>`<th style="padding:8px 3px;font-size:11.5px;color:var(--ink-600);font-weight:600;text-align:center">${dw}<br><span style="font-size:15px;color:var(--ink-900)">${d.split('/')[1]}</span></th>`).join('');
+  const rows = HOURS.map(h=>{
+    const cells = wk.map(([d,dw])=>{
+      if(!IN_PERIOD(d)) return `<td style="padding:2px"><div style="height:30px;border-radius:6px;background:var(--ink-100)"></div></td>`;
+      const occ = hourOccupied(m.id,d,h);
+      if(mode==='book'){
+        const sel = state.slot && state.slot.date===d && (state.slot.time===h || nextHour(state.slot.time)===h);
+        const ok = canStart(m,d,h);
+        let st, txt='';
+        if(occ){ st='background:var(--ink-100);color:var(--ink-400);cursor:not-allowed'; txt='예약'; }
+        else if(sel){ st='background:var(--brand);color:#fff;cursor:pointer'; }
+        else if(ok){ st='background:#fff;border:1px solid var(--brand-200);color:var(--brand-700);cursor:pointer'; }
+        else { st='background:#fafafa;color:var(--ink-300);cursor:default'; }
+        const attr = (ok&&!occ)?`data-slot="${d}|${h}"`:'';
+        return `<td style="padding:2px"><button ${attr} style="width:100%;height:30px;border:none;border-radius:6px;font-size:11px;font-weight:500;${st}">${txt}</button></td>`;
+      } else {
+        const on = av.has(d+'|'+h);
+        let st, txt='';
+        if(occ){ st='background:var(--ink-150);color:var(--ink-500);cursor:not-allowed'; txt='예약'; }
+        else if(on){ st='background:var(--brand-50);border:1px solid var(--brand-200);color:var(--brand-700);cursor:pointer'; txt='가능'; }
+        else { st='background:#fff;border:1px dashed var(--ink-300);color:var(--ink-400);cursor:pointer'; }
+        const attr = occ?'':`data-avail="${d}|${h}"`;
+        return `<td style="padding:2px"><button ${attr} style="width:100%;height:30px;border-radius:6px;font-size:11px;font-weight:500;${st}">${txt}</button></td>`;
+      }
+    }).join('');
+    return `<tr><td style="padding:2px 8px 2px 0;font-size:11px;color:var(--ink-600);white-space:nowrap;text-align:right">${h}</td>${cells}</tr>`;
+  }).join('');
+  return `<div style="overflow:auto"><table style="width:100%;border-collapse:collapse"><thead><tr><th style="width:44px"></th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
+}
 function viewDetail(){
   const m=mentorById(state.mentorId)||state.mentors[0];
   const blocked=menteeBlocked();
-  const timetable=(m.days||[]).map(d=>{
-    const slots=TIMES.map(t=>{
-      const booked=isBooked(m.id,d,t);
-      const sel=state.slot&&state.slot.date===d&&state.slot.time===t;
-      const style= booked?'border:1px solid var(--line);background:var(--ink-100);color:var(--ink-400);cursor:not-allowed;text-decoration:line-through'
-        : sel?'border:1px solid var(--brand);background:var(--brand);color:#fff;cursor:pointer'
-        : 'border:1px solid var(--brand-200);background:#fff;color:var(--brand-700);cursor:pointer';
-      return `<button ${booked?'':`data-slot="${d}|${t}"`} style="height:36px;border-radius:var(--r);font-size:13px;font-weight:500;${style}">${t}</button>`;
-    }).join('');
-    return `<div><div style="text-align:center;padding-bottom:10px;border-bottom:1px solid var(--line);margin-bottom:12px"><div style="font-size:12px;color:var(--ink-600)">${dowOf(d)}</div><div style="font-size:22px;margin-top:2px">${d.split('/')[1]}</div></div><div style="display:flex;flex-direction:column;gap:8px">${slots}</div></div>`;
-  }).join('');
+  const wk=WEEKS[state.week]||WEEKS[0];
+  const grid=weeklyGrid(m, wk, 'book');
   const right = blocked
     ? `<div class="card" style="padding:48px 32px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:14px">
         <div style="width:56px;height:56px;border-radius:50%;background:var(--warn-50);color:var(--warn-700);display:flex;align-items:center;justify-content:center;font-size:26px">!</div>
         <div><h2 style="font-size:18px;font-weight:600;margin:0 0 6px">이미 예약한 멘토링이 있습니다</h2><p style="font-size:13.5px;color:var(--ink-600);line-height:1.6;margin:0;max-width:360px">멘토링은 멘티당 1회만 신청할 수 있습니다. 다른 시간을 예약하려면 내 예약에서 기존 예약을 먼저 취소하세요.</p></div>
         <button data-nav="my" class="btn">내 예약으로 이동</button></div>`
     : `<div class="card" style="padding:20px 22px">
-        <div style="display:flex;align-items:center;justify-content:space-between"><h2 style="font-size:17px;font-weight:600;margin:0">예약 가능 시간</h2><span style="font-size:12px;color:var(--ink-600)">7/21–8/9 · 2시간 단위</span></div>
-        <p style="font-size:12.5px;color:var(--ink-600);margin:6px 0 18px">멘토링은 2시간 단위로 진행됩니다. 이미 예약된 시간은 선택할 수 없습니다.</p>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:14px">${timetable}</div></div>`;
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px"><h2 style="font-size:17px;font-weight:600;margin:0">예약 가능 시간</h2>${weekNav()}</div>
+        <p style="font-size:12.5px;color:var(--ink-600);margin:6px 0 16px">09:00~22:00, 1시간 단위 표시. 시작 시각을 누르면 <b>2시간(2h)</b>이 자동 선택됩니다. 회색은 예약·불가 시간입니다.</p>
+        ${grid}</div>`;
   const bar = (state.role==='student' && !blocked && state.slot) ? `<div style="position:sticky;bottom:0;background:#fff;border-top:1px solid var(--line);box-shadow:0 -2px 8px rgba(60,64,67,.08);padding:14px 32px;display:flex;align-items:center;justify-content:space-between;gap:16px">
-      <div><div style="font-size:12px;color:var(--ink-600)">선택한 시간</div><div style="font-weight:600;font-size:15px">${esc(m.name)} 멘토 · 2026. ${state.slot.date} (${dowOf(state.slot.date)}) ${state.slot.time}</div></div>
+      <div><div style="font-size:12px;color:var(--ink-600)">선택한 시간</div><div style="font-weight:600;font-size:15px">${esc(m.name)} 멘토 · 2026. ${state.slot.date} (${dowOf(state.slot.date)}) ${slotRange(state.slot.time)} <span class="badge b-confirm" style="margin-left:6px">2h</span></div></div>
       <button data-goto="book" class="btn">예약 신청하기 ›</button></div>` : '';
   return `<div style="max-width:1120px;margin:0 auto;padding:22px 32px ${bar?'0':'80px'}">
       <button data-nav="list" class="btn-ghost" style="height:34px;padding:0 14px;border-radius:var(--r-pill);cursor:pointer;margin-bottom:16px">‹ 멘토 목록</button>
-      <div style="display:grid;grid-template-columns:340px 1fr;gap:20px;align-items:start">
+      <div style="display:grid;grid-template-columns:300px 1fr;gap:20px;align-items:start">
         <div class="card" style="padding:22px">
           <div style="display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px">
             <div style="width:78px;height:78px;border-radius:50%;background:${m.color};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:26px">${esc(m.initials)}</div>
@@ -404,7 +452,7 @@ function viewDetail(){
           <div style="border-top:1px solid var(--line);margin:14px 0"></div>
           <div style="font-size:11px;font-weight:600;letter-spacing:.06em;color:var(--ink-600);margin-bottom:10px">가능한 멘토링 분야</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">${(m.areas||[]).map(a=>`<span class="badge b-confirm">${esc(a)}</span>`).join('')}</div>
-          <p style="font-size:13px;line-height:1.6;color:var(--ink-700);margin:0">${esc(m.about)}</p>
+          <p style="font-size:13px;line-height:1.6;color:var(--ink-700);margin:0">${esc(m.about||m.intro||'')}</p>
         </div>
         ${right}
       </div>
@@ -421,7 +469,7 @@ function viewBook(){
     <p style="color:var(--ink-600);font-size:14px;margin:0 0 20px">아래 정보를 입력하면 예약이 확정되고 Google Meet 링크가 생성됩니다.</p>
     <div style="display:flex;align-items:center;gap:13px;background:var(--brand-50);border:1px solid var(--brand-100);border-radius:var(--r-md);padding:14px 16px;margin-bottom:22px">
       <div style="width:44px;height:44px;border-radius:50%;background:${m.color};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;flex:none">${esc(m.initials)}</div>
-      <div style="flex:1"><div style="font-weight:600;font-size:15px">${esc(m.name)} 멘토</div><div style="font-size:13px;color:var(--ink-700);margin-top:2px">2026. ${s.date} (${dowOf(s.date)}) ${s.time}</div></div>
+      <div style="flex:1"><div style="font-weight:600;font-size:15px">${esc(m.name)} 멘토</div><div style="font-size:13px;color:var(--ink-700);margin-top:2px">2026. ${s.date} (${dowOf(s.date)}) ${slotRange(s.time)}</div></div>
       <span class="badge b-confirm">2시간</span>
     </div>
     <div class="card" style="padding:24px">
@@ -447,7 +495,7 @@ async function doBooking(){
         phone=$('#f_phone').value.trim(), topic=$('#f_topic').value.trim(), question=$('#f_question').value.trim();
   if(!name||!school||!email||!phone||!topic){ $('#f_msg').innerHTML=err('필수 항목(*)을 모두 입력하세요.'); return; }
   if(myBookings().some(b=>b.status!=='취소')){ $('#f_msg').innerHTML=err('멘토링은 멘티당 1회만 신청할 수 있습니다.'); return; }
-  if(isBooked(m.id,s.date,s.time)){ $('#f_msg').innerHTML=err('방금 다른 분이 이 시간을 예약했습니다. 다른 시간을 선택하세요.'); return; }
+  if(!canStart(m,s.date,s.time)){ $('#f_msg').innerHTML=err('방금 이 시간이 마감되었습니다. 다른 시간을 선택하세요.'); return; }
   $('#f_submit').disabled=true;
   const rec={ booking_no:bookingNo(), mentor_id:m.id, student_name:name, school, email, phone, topic, question,
     date:s.date, time:s.time, meet:randMeet(), status:'확정' };
@@ -471,7 +519,7 @@ function viewDone(){
         <div><div style="font-weight:600;font-size:16px">${esc(m.name||'')} 멘토</div><div style="font-size:13px;color:var(--ink-600)">${esc(b.topic)}</div></div>
       </div>
       <div style="display:flex;flex-direction:column;gap:13px;padding:16px 0">
-        <div style="display:flex;justify-content:space-between;font-size:14px"><span style="color:var(--ink-600)">예약 일시</span><span style="font-weight:500">2026. ${b.date} (${dowOf(b.date)}) ${b.time}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:14px"><span style="color:var(--ink-600)">예약 일시</span><span style="font-weight:500">2026. ${b.date} (${dowOf(b.date)}) ${slotRange(b.time)}</span></div>
         <div style="display:flex;justify-content:space-between;font-size:14px"><span style="color:var(--ink-600)">Google Meet</span><span style="font-family:var(--font-mono);font-size:12.5px;color:var(--brand)">${esc(b.meet)}</span></div>
         <div style="display:flex;justify-content:space-between;font-size:14px"><span style="color:var(--ink-600)">예약 번호</span><span style="font-family:var(--font-mono);font-size:12.5px;color:var(--ink-700)">${esc(b.booking_no)}</span></div>
       </div>
@@ -490,7 +538,7 @@ function viewMy(){
       <div style="width:44px;height:44px;border-radius:50%;background:${m.color||'#999'};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;flex:none">${esc(m.initials||'')}</div>
       <div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:8px"><span style="font-weight:600">${esc(m.name||'')} 멘토</span><span class="badge ${badgeClass(b.status)}">${esc(b.status)}</span></div>
         <div style="font-size:13px;color:var(--ink-700);margin-top:3px">${esc(b.topic)}</div>
-        <div style="font-size:12.5px;color:var(--ink-600);margin-top:2px">2026. ${b.date} (${dowOf(b.date)}) ${b.time} · ${esc(b.booking_no)}</div></div>
+        <div style="font-size:12.5px;color:var(--ink-600);margin-top:2px">2026. ${b.date} (${dowOf(b.date)}) ${slotRange(b.time)} · ${esc(b.booking_no)}</div></div>
       ${b.status==='확정'?`<button data-cancel="${b.id}" class="btn-ghost" style="height:36px;border-radius:var(--r-pill);cursor:pointer;color:var(--danger-700);border-color:#f3c2bd">예약 취소</button>`:''}
     </div>`; }).join('') : `<div class="card" style="padding:48px;text-align:center;color:var(--ink-600)">아직 예약한 멘토링이 없습니다.<br><button data-nav="list" class="btn" style="margin-top:16px">멘토 찾기</button></div>`;
   return `<div style="max-width:840px;margin:0 auto;padding:28px 32px 60px">
@@ -509,7 +557,7 @@ function viewMentorBookings(){
       <td style="padding:12px 10px;font-weight:500">${esc(b.student_name)}</td>
       <td style="padding:12px 10px;color:var(--ink-700)">${esc(b.school||'')}</td>
       <td style="padding:12px 10px;color:var(--ink-700)">${esc(b.topic)}</td>
-      <td style="padding:12px 10px;white-space:nowrap">${b.date} ${b.time}</td>
+      <td style="padding:12px 10px;white-space:nowrap">${b.date} ${slotRange(b.time)}</td>
       <td style="padding:12px 10px;font-family:var(--font-mono);font-size:12px;color:var(--ink-600)">${esc(b.email)}</td>
     </tr>`).join('') : `<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--ink-600)">예약이 없습니다.</td></tr>`;
   return `<div style="max-width:1120px;margin:0 auto;padding:28px 32px 60px">
@@ -530,7 +578,7 @@ function viewAdminDash(){
       <td style="padding:11px 10px;font-weight:500">${esc(b.student_name)}</td>
       <td style="padding:11px 10px;color:var(--ink-700)">${esc(m.name||'')} 멘토</td>
       <td style="padding:11px 10px;color:var(--ink-700)">${esc(b.topic)}</td>
-      <td style="padding:11px 10px;white-space:nowrap">${b.date} ${b.time}</td>
+      <td style="padding:11px 10px;white-space:nowrap">${b.date} ${slotRange(b.time)}</td>
       <td style="padding:11px 10px"><span class="badge ${badgeClass(b.status)}">${esc(b.status)}</span></td></tr>`;}).join('') || `<tr><td colspan="5" style="padding:40px;text-align:center;color:var(--ink-600)">예약이 없습니다.</td></tr>`;
   return `<div style="max-width:1180px;margin:0 auto;padding:28px 32px 60px">
     <h1 style="font-size:24px;font-weight:500;margin:0 0 22px">대시보드</h1>
@@ -572,42 +620,85 @@ function viewAdminMentors(){
 
 /* ═══════════ 이벤트 바인딩 (위임) ═══════════ */
 /* ── 멘토: 가능시간 ── */
-function viewMentorAvail(){
-  const m = state.mentors.find(x=>x.name===state.session.name);
-  if(!m) return noMentorNotice();
-  const grid=(m.days||[]).map(d=>{
-    const cells=TIMES.map(t=>{
-      const bk=state.bookings.find(b=>String(b.mentor_id)===String(m.id)&&b.date===d&&b.time===t&&b.status!=='취소');
-      const style= bk? 'border:1px solid var(--line);background:var(--ink-100);color:var(--ink-500)' : 'border:1px solid var(--brand-200);background:var(--brand-50);color:var(--brand-700)';
-      return `<div style="height:42px;border-radius:var(--r);display:flex;align-items:center;justify-content:center;gap:6px;font-size:12.5px;font-weight:500;${style}">${t}<span style="font-size:11px">${bk?'예약됨':'가능'}</span></div>`;
-    }).join('');
-    return `<div><div style="text-align:center;padding-bottom:10px;border-bottom:1px solid var(--line);margin-bottom:12px"><div style="font-size:12px;color:var(--ink-600)">${dowOf(d)}</div><div style="font-size:22px;margin-top:2px">${d.split('/')[1]}</div></div><div style="display:flex;flex-direction:column;gap:8px">${cells}</div></div>`;
-  }).join('');
-  return `<div style="max-width:1000px;margin:0 auto;padding:28px 32px 60px">
-    <h1 style="font-size:24px;font-weight:500;margin:0 0 4px">가능 시간</h1>
-    <p style="color:var(--ink-600);font-size:14px;margin:0 0 22px">${esc(m.name)} 멘토의 멘토링 가능 시간입니다. 이미 예약된 시간은 회색으로 표시됩니다.</p>
-    <div class="card" style="padding:20px 22px"><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:14px">${grid}</div></div></div>`;
+function getMyMentor(){
+  const s=state.session; if(!s) return null;
+  const byEmail = state.mentors.find(m=>m.email && String(m.email).toLowerCase()===String(s.email).toLowerCase());
+  if(byEmail) return byEmail;
+  return state.mentors.find(m=>m.name===s.name) || null;
 }
-/* ── 멘토: 프로필 ── */
+function mentorDraft(){
+  const m=getMyMentor(); if(m) return m;
+  const s=state.session;
+  return {id:null, name:s.name, email:s.email, initials:(s.name||'').trim().slice(0,2), color:'#2563eb', field:'', org:'', tags:[], areas:[], intro:'', about:'', days:[], avail:[]};
+}
+async function nextMentorId(){
+  const ids=state.mentors.map(m=>parseInt(m.id,10)).filter(n=>!isNaN(n));
+  return (ids.length?Math.max(...ids):0)+1;
+}
+/* ── 멘토: 가능시간 (편집) ── */
+function viewMentorAvail(){
+  const m=mentorDraft();
+  if(state.availDraft===null){ state.availDraft = mentorAvailSet(m); }
+  const wk=WEEKS[state.week]||WEEKS[0];
+  const grid=weeklyGrid(m, wk, 'edit');
+  return `<div style="max-width:1000px;margin:0 auto;padding:28px 32px 60px">
+    <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px">
+      <div><h1 style="font-size:24px;font-weight:500;margin:0">가능 시간 설정</h1>
+      <p style="color:var(--ink-600);font-size:14px;margin:6px 0 0">멘토링 가능한 시간을 선택하세요. 칸을 누르면 가능/해제가 전환됩니다. 예약된 시간은 잠깁니다.</p></div>
+      <button id="av_save" class="btn">저장</button>
+    </div>
+    <div class="card" style="padding:20px 22px;margin-top:16px">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:10px">${weekNav()}</div>
+      ${grid}</div></div>`;
+}
+/* ── 멘토: 프로필 (편집) ── */
 function viewMentorProfile(){
-  const m = state.mentors.find(x=>x.name===state.session.name);
-  if(!m) return noMentorNotice();
+  const m=mentorDraft();
   return `<div style="max-width:720px;margin:0 auto;padding:28px 32px 60px">
-    <h1 style="font-size:24px;font-weight:500;margin:0 0 22px">프로필</h1>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:22px"><h1 style="font-size:24px;font-weight:500;margin:0">프로필${m.id?'':' 등록'}</h1><button id="pf_save" class="btn">저장</button></div>
     <div class="card" style="padding:24px">
-      <div style="display:flex;align-items:center;gap:16px">
-        <div style="width:64px;height:64px;border-radius:50%;background:${m.color};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:22px">${esc(m.initials)}</div>
-        <div><div style="font-weight:600;font-size:20px">${esc(m.name)} 멘토</div><div style="font-size:13.5px;color:var(--ink-600);margin-top:2px">${esc(m.org)} · ${esc(m.field)}</div></div>
+      <div style="display:flex;align-items:center;gap:16px;margin-bottom:18px">
+        <div style="width:64px;height:64px;border-radius:50%;background:${m.color};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:22px">${esc(m.initials||'')}</div>
+        <div style="font-size:13px;color:var(--ink-600)">로그인 이메일: ${esc(m.email||state.session.email)}</div>
       </div>
-      <div style="border-top:1px solid var(--line);margin:18px 0"></div>
-      <div style="font-size:11px;font-weight:600;letter-spacing:.06em;color:var(--ink-600);margin-bottom:10px">가능한 멘토링 분야</div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px">${(m.areas||[]).map(a=>`<span class="badge b-confirm">${esc(a)}</span>`).join('')}</div>
-      <div style="font-size:11px;font-weight:600;letter-spacing:.06em;color:var(--ink-600);margin-bottom:8px">소개</div>
-      <p style="font-size:14px;line-height:1.6;color:var(--ink-700);margin:0">${esc(m.about||m.intro||'')}</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px 18px">
+        <label class="field"><span class="lbl">성명</span><input id="pf_name" class="inp" value="${esc(m.name||'')}"></label>
+        <label class="field"><span class="lbl">소속</span><input id="pf_org" class="inp" value="${esc(m.org||'')}" placeholder="○○회사"></label>
+        <label class="field" style="grid-column:1/-1"><span class="lbl">대표 분야</span><input id="pf_field" class="inp" value="${esc(m.field||'')}" placeholder="예) AI/LLM"></label>
+        <label class="field" style="grid-column:1/-1"><span class="lbl">태그 <span style="font-weight:400;color:var(--ink-500)">(쉼표로 구분)</span></span><input id="pf_tags" class="inp" value="${esc((m.tags||[]).join(', '))}" placeholder="RAG, LangChain, 프롬프트"></label>
+        <label class="field" style="grid-column:1/-1"><span class="lbl">가능한 멘토링 분야 <span style="font-weight:400;color:var(--ink-500)">(쉼표로 구분)</span></span><input id="pf_areas" class="inp" value="${esc((m.areas||[]).join(', '))}" placeholder="RAG 파이프라인, LLM 서빙"></label>
+        <label class="field" style="grid-column:1/-1"><span class="lbl">한 줄 소개</span><input id="pf_intro" class="inp" value="${esc(m.intro||'')}"></label>
+        <label class="field" style="grid-column:1/-1"><span class="lbl">소개</span><textarea id="pf_about" class="inp" rows="4">${esc(m.about||'')}</textarea></label>
+      </div>
+      <div id="pf_msg" style="margin-top:14px"></div>
     </div></div>`;
 }
+async function saveAvail(){
+  const m=mentorDraft(); const availArr=[...(state.availDraft||new Set())];
+  try{
+    if(m.id){ await store.updateMentor(m.id, {avail:availArr, email:m.email||state.session.email}); }
+    else { const nid=await nextMentorId(); await store.addMentor({ id:nid, name:m.name, email:state.session.email, initials:m.initials, color:m.color, field:m.field||'', org:m.org||'', tags:m.tags||[], areas:m.areas||[], intro:m.intro||'', about:m.about||'', days:[], avail:availArr }); }
+    toast('가능 시간이 저장되었습니다.');
+  }catch(e){ toast('저장 오류: '+(e.message||e)); return; }
+  state.availDraft=null; await reload();
+}
+async function saveProfile(){
+  const g=(id)=>$('#'+id)?$('#'+id).value.trim():'';
+  const nm=g('pf_name')||state.session.name;
+  const patch={ name:nm, org:g('pf_org'), field:g('pf_field'),
+    tags:g('pf_tags').split(',').map(x=>x.trim()).filter(Boolean),
+    areas:g('pf_areas').split(',').map(x=>x.trim()).filter(Boolean),
+    intro:g('pf_intro'), about:g('pf_about'), initials:nm.slice(0,2), email:state.session.email };
+  const m=getMyMentor();
+  try{
+    if(m){ await store.updateMentor(m.id, patch); }
+    else { const nid=await nextMentorId(); await store.addMentor({ id:nid, color:'#2563eb', days:[], avail:[], ...patch }); }
+    toast('프로필이 저장되었습니다.');
+  }catch(e){ const el=$('#pf_msg'); if(el) el.innerHTML=err('저장 오류: '+(e.message||e)); return; }
+  await reload();
+}
 function noMentorNotice(){
-  return `<div style="max-width:720px;margin:0 auto;padding:48px 32px"><div class="card" style="padding:40px;text-align:center;color:var(--ink-600);line-height:1.7">로그인하신 성명과 일치하는 멘토 정보가 없습니다.<br>멘토 프로필·가능시간은 등록된 멘토 성명으로 로그인해야 표시됩니다.</div></div>`;
+  return `<div style="max-width:720px;margin:0 auto;padding:48px 32px"><div class="card" style="padding:40px;text-align:center;color:var(--ink-600);line-height:1.7">멘토 정보를 불러올 수 없습니다.</div></div>`;
 }
 function bindShell(){
   const app=$('#app');
@@ -615,12 +706,16 @@ function bindShell(){
   app.querySelectorAll('[data-logout]').forEach(b=>b.addEventListener('click',logout));
   app.querySelectorAll('[data-open]').forEach(b=>b.addEventListener('click',()=>{ state.mentorId=b.dataset.open; state.slot=null; go('detail'); }));
   app.querySelectorAll('[data-slot]').forEach(b=>b.addEventListener('click',()=>{ const [d,t]=b.dataset.slot.split('|'); state.slot={date:d,time:t}; render(); }));
+  app.querySelectorAll('[data-week]').forEach(b=>b.addEventListener('click',()=>{ if(b.hasAttribute('disabled'))return; state.week = b.dataset.week==='next'?Math.min(2,state.week+1):Math.max(0,state.week-1); render(); }));
+  app.querySelectorAll('[data-avail]').forEach(b=>b.addEventListener('click',()=>{ const k=b.dataset.avail; if(!state.availDraft) state.availDraft=new Set(); if(state.availDraft.has(k)) state.availDraft.delete(k); else state.availDraft.add(k); render(); }));
+  const avs=$('#av_save'); if(avs) avs.addEventListener('click',saveAvail);
+  const pfs=$('#pf_save'); if(pfs) pfs.addEventListener('click',saveProfile);
   app.querySelectorAll('[data-goto="book"]').forEach(b=>b.addEventListener('click',()=>{ if(state.role!=='student'||menteeBlocked())return; go('book'); }));
   const fs=$('#f_submit'); if(fs) fs.addEventListener('click',doBooking);
   const bp=$('#f_phone'); if(bp) bp.addEventListener('input',()=>{ bp.value=formatPhone(bp.value); });
   app.querySelectorAll('[data-cancel]').forEach(b=>b.addEventListener('click',async()=>{ if(!confirm('예약을 취소하시겠습니까?'))return; try{ await store.cancelBooking(b.dataset.cancel); toast('예약이 취소되었습니다.'); }catch(e){ toast('취소 오류: '+(e.message||e)); } await reload(); }));
 }
-function go(v){ state.view=v; if(v==='list'){ state.slot=null; state.mentorId=null; } render(); }
+function go(v){ state.view=v; state.week=0; if(v!=='mavail') state.availDraft=null; if(v==='list'){ state.slot=null; state.mentorId=null; } render(); }
 function logout(){ state.session=null; localStorage.removeItem('ict_session'); state.gateView='login'; state.prefill={name:'',phone:'',email:''}; state.view='list'; state.slot=null; state.mentorId=null; render(); }
 
 /* ═══════════ 시작 ═══════════ */
