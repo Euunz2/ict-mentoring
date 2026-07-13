@@ -71,6 +71,16 @@ const LOGO_SRC = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASwAAADvCAYAAABI
 const CODES = { 'ICT-MTE-2026':'student', 'ICT-MTR-2026':'mentor', 'ICT-ADM-2026':'admin' };
 const ROLE_KO = { student:'멘티', mentor:'멘토', admin:'관리자' };
 const COURSES = ['데이터 엔지니어링','데이터 분석','ML 양자컴퓨팅'];
+const ICONS = {
+  list:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.5-3 2.8-4.6 5.5-4.6S14 16 14.5 19" stroke-linecap="round"/><circle cx="17.5" cy="9" r="2.4"/><path d="M15 18c.3-2 1.6-3 3-3s2.7 1 3 3" stroke-linecap="round"/></svg>',
+  my:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="5" width="16" height="15" rx="2.5"/><path d="M4 9h16M8 3v4M16 3v4" stroke-linecap="round"/><path d="M9 14l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  mbookings:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="5" width="16" height="15" rx="2.5"/><path d="M4 9h16M8 3v4M16 3v4" stroke-linecap="round"/><path d="M8 13h4M8 16h6" stroke-linecap="round"/></svg>',
+  mavail:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  mprofile:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="8" r="3.6"/><path d="M5 20c.7-4 3.6-6 7-6s6.3 2 7 6" stroke-linecap="round"/></svg>',
+  adash:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>',
+  amembers:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="8" r="3.6"/><path d="M5 20c.7-4 3.6-6 7-6s6.3 2 7 6" stroke-linecap="round"/></svg>',
+  amentors:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.5-3 2.8-4.6 5.5-4.6S14 16 14.5 19" stroke-linecap="round"/><circle cx="17.5" cy="9" r="2.4"/><path d="M15 18c.3-2 1.6-3 3-3s2.7 1 3 3" stroke-linecap="round"/></svg>',
+};
 const DAYS = [
   {date:'7/21',dow:'화'},{date:'7/22',dow:'수'},{date:'7/23',dow:'목'},{date:'7/24',dow:'금'},{date:'7/25',dow:'토'},
   {date:'7/28',dow:'월'},{date:'7/29',dow:'화'},{date:'7/30',dow:'수'},{date:'8/1',dow:'금'},
@@ -144,6 +154,7 @@ const myBookings = ()=> state.bookings.filter(b=> state.session && b.email===sta
 const menteeBlocked = ()=> state.role==='student' && myBookings().some(b=>b.status!=='취소');
 const mentorById = (id)=> state.mentors.find(m=>String(m.id)===String(id));
 const badgeClass = (s)=> s==='확정'?'b-confirm':s==='취소'?'b-cancel':'b-done';
+function formatPhone(v){ let d=(v||'').replace(/\D/g,'').slice(0,11); if(d.startsWith('02')){ if(d.length<3) return d; if(d.length<6) return d.slice(0,2)+'-'+d.slice(2); if(d.length<10) return d.slice(0,2)+'-'+d.slice(2,d.length-4)+'-'+d.slice(d.length-4); return d.slice(0,2)+'-'+d.slice(2,6)+'-'+d.slice(6,10); } if(d.length<4) return d; if(d.length<8) return d.slice(0,3)+'-'+d.slice(3); if(d.length<11) return d.slice(0,3)+'-'+d.slice(3,d.length-4)+'-'+d.slice(d.length-4); return d.slice(0,3)+'-'+d.slice(3,7)+'-'+d.slice(7,11); }
 
 async function reload(){
   try{
@@ -192,6 +203,7 @@ function viewLogin(){
 }
 function bindLogin(){
   $('#l_submit').addEventListener('click',doLogin);
+  { const lp=$('#l_phone'); if(lp) lp.addEventListener('input',()=>{ lp.value=formatPhone(lp.value); }); }
   const ls=$('#l_signup'); if(ls) ls.addEventListener('click',(e)=>{ e.preventDefault(); state.prefill={name:$('#l_name').value.trim(),phone:$('#l_phone').value.trim(),email:$('#l_email').value.trim()}; state.gateView='signup'; render(); });
   ['l_name','l_phone','l_email'].forEach(id=>{ const el=$('#'+id); if(el) el.addEventListener('keydown',e=>{ if(e.key==='Enter') doLogin(); }); });
 }
@@ -245,6 +257,7 @@ function bindSignup(){
   syncCourseVisibility();
   $('#g_code').addEventListener('input',syncCourseVisibility);
   $('#g_submit').addEventListener('click',doSignup);
+  { const gp=$('#g_phone'); if(gp) gp.addEventListener('input',()=>{ gp.value=formatPhone(gp.value); }); }
   const sl=$('#s_login'); if(sl) sl.addEventListener('click',(e)=>{ e.preventDefault(); state.prefill={name:$('#g_name').value.trim(),phone:$('#g_phone').value.trim(),email:$('#g_email').value.trim()}; state.gateView='login'; render(); });
 }
 async function doSignup(){
@@ -274,20 +287,22 @@ function shell(){
   const initials = state.session.name.trim().slice(0,2);
   const nav = {
     student:[['list','멘토찾기'],['my','내예약']],
-    mentor:[['mbookings','예약현황']],
-    admin:[['adash','대시보드'],['amembers','회원관리'],['amentors','멘토관리']],
+    mentor:[['list','멘토찾기'],['mbookings','예약현황'],['mavail','가능시간'],['mprofile','프로필']],
+    admin:[['adash','대시보드'],['list','멘토찾기'],['amembers','회원관리'],['amentors','멘토관리']],
   }[role];
+  const activeKey = (state.view==='detail'||state.view==='book'||state.view==='done')?'list':state.view;
+  const sidebar = nav.map(([v,label])=>{
+    const on = activeKey===v;
+    return `<button data-nav="${v}" style="width:74px;height:66px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;border:none;border-radius:14px;cursor:pointer;background:${on?'var(--brand-50)':'transparent'};color:${on?'var(--brand-700)':'var(--ink-700)'};font-size:11px;font-weight:600;font-family:var(--font-display)">${ICONS[v]||''}<span>${label}</span></button>`;
+  }).join('');
   return `
-  <div style="min-height:100vh;display:flex;flex-direction:column">
-    <header style="height:60px;flex:none;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;padding:0 20px;position:sticky;top:0;z-index:40">
+  <div style="height:100vh;display:flex;flex-direction:column">
+    <header style="height:60px;flex:none;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;padding:0 20px;z-index:40">
       <div style="display:flex;align-items:center;gap:10px">
         <img src="${LOGO_SRC}" alt="수도권 ICT이노베이션스퀘어" style="height:36px;width:auto;display:block;object-fit:contain">
         <div style="line-height:1.15"><div style="font-weight:600;font-size:15px">ICT 멘토링</div><div style="font-size:11px;color:var(--ink-600)">수도권 ICT이노베이션스퀘어</div></div>
       </div>
       <div style="flex:1"></div>
-      <nav style="display:flex;gap:4px">
-        ${nav.map(([v,label])=>`<button data-nav="${v}" style="height:36px;padding:0 14px;border:none;border-radius:var(--r-pill);font-size:13px;font-weight:600;cursor:pointer;background:${state.view===v?'var(--brand-50)':'transparent'};color:${state.view===v?'var(--brand-700)':'var(--ink-700)'}">${label}</button>`).join('')}
-      </nav>
       <div style="display:flex;align-items:center;gap:8px;padding:3px 10px 3px 3px;border-radius:var(--r-pill);border:1px solid var(--line)">
         <div style="width:30px;height:30px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:12px">${esc(initials)}</div>
         <span style="font-size:13px;font-weight:500;color:var(--ink-800)">${esc(state.session.name)}</span>
@@ -295,9 +310,13 @@ function shell(){
       </div>
       <button data-logout style="height:36px;padding:0 12px;border:1px solid var(--line);background:#fff;border-radius:var(--r-pill);font-size:13px;color:var(--ink-700);cursor:pointer">로그아웃</button>
     </header>
-    <main style="flex:1;overflow:auto">${body()}</main>
+    <div style="flex:1;display:flex;min-height:0">
+      <nav style="width:90px;flex:none;background:#fff;border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;gap:4px;padding:14px 0">${sidebar}</nav>
+      <main style="flex:1;overflow:auto;min-width:0">${body()}</main>
+    </div>
   </div>`;
 }
+
 function body(){
   switch(state.view){
     case 'list': return viewList();
@@ -306,6 +325,8 @@ function body(){
     case 'done': return viewDone();
     case 'my': return viewMy();
     case 'mbookings': return viewMentorBookings();
+    case 'mavail': return viewMentorAvail();
+    case 'mprofile': return viewMentorProfile();
     case 'adash': return viewAdminDash();
     case 'amembers': return viewAdminMembers();
     case 'amentors': return viewAdminMentors();
@@ -368,7 +389,7 @@ function viewDetail(){
         <div style="display:flex;align-items:center;justify-content:space-between"><h2 style="font-size:17px;font-weight:600;margin:0">예약 가능 시간</h2><span style="font-size:12px;color:var(--ink-600)">7/21–8/9 · 2시간 단위</span></div>
         <p style="font-size:12.5px;color:var(--ink-600);margin:6px 0 18px">멘토링은 2시간 단위로 진행됩니다. 이미 예약된 시간은 선택할 수 없습니다.</p>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:14px">${timetable}</div></div>`;
-  const bar = (!blocked && state.slot) ? `<div style="position:sticky;bottom:0;background:#fff;border-top:1px solid var(--line);box-shadow:0 -2px 8px rgba(60,64,67,.08);padding:14px 32px;display:flex;align-items:center;justify-content:space-between;gap:16px">
+  const bar = (state.role==='student' && !blocked && state.slot) ? `<div style="position:sticky;bottom:0;background:#fff;border-top:1px solid var(--line);box-shadow:0 -2px 8px rgba(60,64,67,.08);padding:14px 32px;display:flex;align-items:center;justify-content:space-between;gap:16px">
       <div><div style="font-size:12px;color:var(--ink-600)">선택한 시간</div><div style="font-weight:600;font-size:15px">${esc(m.name)} 멘토 · 2026. ${state.slot.date} (${dowOf(state.slot.date)}) ${state.slot.time}</div></div>
       <button data-goto="book" class="btn">예약 신청하기 ›</button></div>` : '';
   return `<div style="max-width:1120px;margin:0 auto;padding:22px 32px ${bar?'0':'80px'}">
@@ -550,14 +571,53 @@ function viewAdminMentors(){
 }
 
 /* ═══════════ 이벤트 바인딩 (위임) ═══════════ */
+/* ── 멘토: 가능시간 ── */
+function viewMentorAvail(){
+  const m = state.mentors.find(x=>x.name===state.session.name);
+  if(!m) return noMentorNotice();
+  const grid=(m.days||[]).map(d=>{
+    const cells=TIMES.map(t=>{
+      const bk=state.bookings.find(b=>String(b.mentor_id)===String(m.id)&&b.date===d&&b.time===t&&b.status!=='취소');
+      const style= bk? 'border:1px solid var(--line);background:var(--ink-100);color:var(--ink-500)' : 'border:1px solid var(--brand-200);background:var(--brand-50);color:var(--brand-700)';
+      return `<div style="height:42px;border-radius:var(--r);display:flex;align-items:center;justify-content:center;gap:6px;font-size:12.5px;font-weight:500;${style}">${t}<span style="font-size:11px">${bk?'예약됨':'가능'}</span></div>`;
+    }).join('');
+    return `<div><div style="text-align:center;padding-bottom:10px;border-bottom:1px solid var(--line);margin-bottom:12px"><div style="font-size:12px;color:var(--ink-600)">${dowOf(d)}</div><div style="font-size:22px;margin-top:2px">${d.split('/')[1]}</div></div><div style="display:flex;flex-direction:column;gap:8px">${cells}</div></div>`;
+  }).join('');
+  return `<div style="max-width:1000px;margin:0 auto;padding:28px 32px 60px">
+    <h1 style="font-size:24px;font-weight:500;margin:0 0 4px">가능 시간</h1>
+    <p style="color:var(--ink-600);font-size:14px;margin:0 0 22px">${esc(m.name)} 멘토의 멘토링 가능 시간입니다. 이미 예약된 시간은 회색으로 표시됩니다.</p>
+    <div class="card" style="padding:20px 22px"><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:14px">${grid}</div></div></div>`;
+}
+/* ── 멘토: 프로필 ── */
+function viewMentorProfile(){
+  const m = state.mentors.find(x=>x.name===state.session.name);
+  if(!m) return noMentorNotice();
+  return `<div style="max-width:720px;margin:0 auto;padding:28px 32px 60px">
+    <h1 style="font-size:24px;font-weight:500;margin:0 0 22px">프로필</h1>
+    <div class="card" style="padding:24px">
+      <div style="display:flex;align-items:center;gap:16px">
+        <div style="width:64px;height:64px;border-radius:50%;background:${m.color};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:22px">${esc(m.initials)}</div>
+        <div><div style="font-weight:600;font-size:20px">${esc(m.name)} 멘토</div><div style="font-size:13.5px;color:var(--ink-600);margin-top:2px">${esc(m.org)} · ${esc(m.field)}</div></div>
+      </div>
+      <div style="border-top:1px solid var(--line);margin:18px 0"></div>
+      <div style="font-size:11px;font-weight:600;letter-spacing:.06em;color:var(--ink-600);margin-bottom:10px">가능한 멘토링 분야</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px">${(m.areas||[]).map(a=>`<span class="badge b-confirm">${esc(a)}</span>`).join('')}</div>
+      <div style="font-size:11px;font-weight:600;letter-spacing:.06em;color:var(--ink-600);margin-bottom:8px">소개</div>
+      <p style="font-size:14px;line-height:1.6;color:var(--ink-700);margin:0">${esc(m.about||m.intro||'')}</p>
+    </div></div>`;
+}
+function noMentorNotice(){
+  return `<div style="max-width:720px;margin:0 auto;padding:48px 32px"><div class="card" style="padding:40px;text-align:center;color:var(--ink-600);line-height:1.7">로그인하신 성명과 일치하는 멘토 정보가 없습니다.<br>멘토 프로필·가능시간은 등록된 멘토 성명으로 로그인해야 표시됩니다.</div></div>`;
+}
 function bindShell(){
   const app=$('#app');
   app.querySelectorAll('[data-nav]').forEach(b=>b.addEventListener('click',()=>{ go(b.dataset.nav); }));
   app.querySelectorAll('[data-logout]').forEach(b=>b.addEventListener('click',logout));
   app.querySelectorAll('[data-open]').forEach(b=>b.addEventListener('click',()=>{ state.mentorId=b.dataset.open; state.slot=null; go('detail'); }));
   app.querySelectorAll('[data-slot]').forEach(b=>b.addEventListener('click',()=>{ const [d,t]=b.dataset.slot.split('|'); state.slot={date:d,time:t}; render(); }));
-  app.querySelectorAll('[data-goto="book"]').forEach(b=>b.addEventListener('click',()=>{ if(menteeBlocked())return; go('book'); }));
+  app.querySelectorAll('[data-goto="book"]').forEach(b=>b.addEventListener('click',()=>{ if(state.role!=='student'||menteeBlocked())return; go('book'); }));
   const fs=$('#f_submit'); if(fs) fs.addEventListener('click',doBooking);
+  const bp=$('#f_phone'); if(bp) bp.addEventListener('input',()=>{ bp.value=formatPhone(bp.value); });
   app.querySelectorAll('[data-cancel]').forEach(b=>b.addEventListener('click',async()=>{ if(!confirm('예약을 취소하시겠습니까?'))return; try{ await store.cancelBooking(b.dataset.cancel); toast('예약이 취소되었습니다.'); }catch(e){ toast('취소 오류: '+(e.message||e)); } await reload(); }));
 }
 function go(v){ state.view=v; if(v==='list'){ state.slot=null; state.mentorId=null; } render(); }
